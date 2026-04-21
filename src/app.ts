@@ -1,12 +1,14 @@
 import express, { NextFunction, Request, Response } from "express";
 import { releasesRouter } from "./routes/releases";
 import { downloadRouter } from "./routes/download";
+import { statsRouter } from "./routes/stats";
 
 export function createApp() {
   const app = express();
 
   app.use("/api/releases", releasesRouter);
   app.use("/api/download", downloadRouter);
+  app.use("/api/stats", statsRouter);
 
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     console.error(err);

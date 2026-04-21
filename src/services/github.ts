@@ -80,7 +80,7 @@ class GithubService {
         if (asset.id === assetId) {
           const githubUrl = this.assetUrlMap.get(assetId);
           if (!githubUrl) return null;
-          return { name: asset.name, githubUrl };
+          return { ...asset, githubUrl };
         }
       }
     }

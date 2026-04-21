@@ -34,7 +34,6 @@ export interface GithubRelease {
   assets: GithubAsset[];
 }
 
-export interface ResolvedAsset {
-  name: string;
+export interface ResolvedAsset extends ParsedAsset {
   githubUrl: string;
 }
