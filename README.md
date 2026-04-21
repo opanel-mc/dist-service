@@ -1,2 +1,3 @@
-# opanel-dist
-opanel release download service
+# OPanel Dist Service
+
+**<https://dist.opanel.cn>**
