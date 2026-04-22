@@ -56,6 +56,7 @@ class GithubService {
             ...parsed,
             size: a.size,
             createdAt: a.created_at,
+            digest: a.digest,
           };
         })
         .filter((a): a is ParsedAsset => a !== null);

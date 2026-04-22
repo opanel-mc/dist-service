@@ -6,6 +6,7 @@ export interface ParsedAsset {
   opanelVersion: string;
   size: number;
   createdAt: string;
+  digest?: string;
 }
 
 export interface ReleaseInfo {
@@ -24,6 +25,7 @@ export interface GithubAsset {
   size: number;
   browser_download_url: string;
   created_at: string;
+  digest?: string;
 }
 
 export interface GithubRelease {
