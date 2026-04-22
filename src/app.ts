@@ -1,10 +1,13 @@
 import express, { NextFunction, Request, Response } from "express";
+import cors from "cors";
 import { releasesRouter } from "./routes/releases";
 import { downloadRouter } from "./routes/download";
 import { statsRouter } from "./routes/stats";
 
 export function createApp() {
   const app = express();
+  
+  app.use(cors());
 
   app.use("/api/releases", releasesRouter);
   app.use("/api/download", downloadRouter);
