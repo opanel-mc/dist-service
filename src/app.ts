@@ -1,3 +1,4 @@
+import fs from "fs";
 import express, { NextFunction, Request, Response } from "express";
 import cors from "cors";
 import { releasesRouter } from "./routes/releases";
@@ -20,4 +21,15 @@ export function createApp() {
   });
 
   return app;
+}
+
+export function getSSLConfig(): { key: Buffer; cert: Buffer } | null {
+  if (process.env.SSL !== "true") return null;
+  const keyPath = process.env.SSL_KEY;
+  const certPath = process.env.SSL_CERT;
+  if (!keyPath || !certPath) return null;
+  return {
+    key: fs.readFileSync(keyPath),
+    cert: fs.readFileSync(certPath),
+  };
 }
