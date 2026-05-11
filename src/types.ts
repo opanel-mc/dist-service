@@ -39,3 +39,32 @@ export interface GithubRelease {
 export interface ResolvedAsset extends ParsedAsset {
   githubUrl: string;
 }
+
+export interface DownloadRecord {
+  timestamp: string;
+  ip: string;
+  assetId: number;
+  assetName: string;
+  server: string;
+  gameVersion: string;
+  opanelVersion: string;
+}
+
+export interface DailyBreakdown {
+  opanelVersion: Record<string, number>;
+  server: Record<string, number>;
+  gameVersion: Record<string, number>;
+}
+
+export interface DailyStats {
+  date: string;
+  count: number;
+  breakdown: DailyBreakdown;
+}
+
+export interface StatsSnapshot {
+  totalDownloads: number;
+  today: DailyStats;
+  history: DailyStats[];
+  records: DownloadRecord[];
+}

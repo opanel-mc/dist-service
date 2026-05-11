@@ -6,14 +6,16 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.statsService = void 0;
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
+const MAX_RECORDS = 10000;
+const MAX_HISTORY_DAYS = 30;
 function todayDate() {
     return new Date().toISOString().slice(0, 10);
 }
-function emptyToday() {
+function emptyDay(date) {
     return {
-        date: todayDate(),
+        date: date ?? todayDate(),
         count: 0,
-        assets: { opanelVersion: {}, server: {}, gameVersion: {} },
+        breakdown: { opanelVersion: {}, server: {}, gameVersion: {} },
     };
 }
 class StatsService {
@@ -25,19 +27,40 @@ class StatsService {
             fs_1.default.mkdirSync(dir, { recursive: true });
         }
         this.data = this.load();
+        this.prune();
     }
     load() {
         try {
             const raw = fs_1.default.readFileSync(this.statsFile, "utf-8");
-            return JSON.parse(raw);
+            const parsed = JSON.parse(raw);
+            return {
+                totalDownloads: parsed.totalDownloads ?? 0,
+                today: parsed.today ?? emptyDay(),
+                history: parsed.history ?? [],
+                records: parsed.records ?? [],
+            };
         }
         catch {
-            return { totalDownloads: 0, today: emptyToday() };
+            return { totalDownloads: 0, today: emptyDay(), history: [], records: [] };
         }
     }
     rolloverIfNeeded() {
-        if (this.data.today.date !== todayDate()) {
-            this.data.today = emptyToday();
+        if (this.data.today.date === todayDate())
+            return;
+        this.data.history.push(this.data.today);
+        if (this.data.history.length > MAX_HISTORY_DAYS) {
+            this.data.history = this.data.history.slice(-MAX_HISTORY_DAYS);
+        }
+        this.data.today = emptyDay();
+    }
+    prune() {
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - MAX_HISTORY_DAYS);
+        const cutoffStr = cutoff.toISOString().slice(0, 10);
+        this.data.history = this.data.history.filter((d) => d.date >= cutoffStr);
+        this.data.records = this.data.records.filter((r) => r.timestamp.slice(0, 10) >= cutoffStr);
+        if (this.data.records.length > MAX_RECORDS) {
+            this.data.records = this.data.records.slice(-MAX_RECORDS);
         }
     }
     scheduleFlush() {
@@ -53,20 +76,38 @@ class StatsService {
             }
         }, 500);
     }
-    recordDownload(asset) {
+    recordDownload(asset, ip) {
         this.rolloverIfNeeded();
         this.data.totalDownloads++;
-        this.data.today.count++;
-        const { opanelVersion, server, gameVersion } = asset;
-        const a = this.data.today.assets;
-        a.opanelVersion[opanelVersion] = (a.opanelVersion[opanelVersion] ?? 0) + 1;
-        a.server[server] = (a.server[server] ?? 0) + 1;
-        a.gameVersion[gameVersion] = (a.gameVersion[gameVersion] ?? 0) + 1;
+        const today = this.data.today;
+        today.count++;
+        const b = today.breakdown;
+        b.opanelVersion[asset.opanelVersion] = (b.opanelVersion[asset.opanelVersion] ?? 0) + 1;
+        b.server[asset.server] = (b.server[asset.server] ?? 0) + 1;
+        b.gameVersion[asset.gameVersion] = (b.gameVersion[asset.gameVersion] ?? 0) + 1;
+        const record = {
+            timestamp: new Date().toISOString(),
+            ip,
+            assetId: asset.id,
+            assetName: asset.name,
+            server: asset.server,
+            gameVersion: asset.gameVersion,
+            opanelVersion: asset.opanelVersion,
+        };
+        this.data.records.push(record);
+        if (this.data.records.length > MAX_RECORDS * 1.5) {
+            this.data.records = this.data.records.slice(-MAX_RECORDS);
+        }
         this.scheduleFlush();
     }
     getSnapshot() {
         this.rolloverIfNeeded();
-        return JSON.parse(JSON.stringify(this.data));
+        return {
+            totalDownloads: this.data.totalDownloads,
+            today: JSON.parse(JSON.stringify(this.data.today)),
+            history: JSON.parse(JSON.stringify(this.data.history)),
+            records: JSON.parse(JSON.stringify(this.data.records)),
+        };
     }
 }
 exports.statsService = new StatsService(process.env.STATS_FILE ?? "./data/stats.json");

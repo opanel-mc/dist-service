@@ -33,7 +33,7 @@ exports.downloadRouter.get("/:assetId", async (req, res, next) => {
         res.setHeader("Content-Type", "application/java-archive");
         res.setHeader("Content-Disposition", `attachment; filename="${asset.name}"`);
         res.setHeader("Content-Length", stat.size);
-        stats_1.statsService.recordDownload(asset);
+        stats_1.statsService.recordDownload(asset, req.ip ?? "unknown");
         fs_1.default.createReadStream(localPath).pipe(res);
     }
     catch (err) {

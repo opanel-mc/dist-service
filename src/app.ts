@@ -1,4 +1,5 @@
 import fs from "fs";
+import path from "path";
 import express, { NextFunction, Request, Response } from "express";
 import cors from "cors";
 import { releasesRouter } from "./routes/releases";
@@ -7,12 +8,21 @@ import { statsRouter } from "./routes/stats";
 
 export function createApp() {
   const app = express();
-  
+
   app.use(cors());
 
   app.use("/api/releases", releasesRouter);
   app.use("/api/download", downloadRouter);
   app.use("/api/stats", statsRouter);
+
+  app.get("/x", (_req: Request, res: Response) => {
+    const htmlPath = path.resolve(__dirname, "../src/views/dashboard.html");
+    if (fs.existsSync(htmlPath)) {
+      res.sendFile(htmlPath);
+    } else {
+      res.status(404).send("Dashboard not found");
+    }
+  });
 
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     console.error(err);

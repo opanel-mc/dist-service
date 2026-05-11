@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OPanel Dist Service - Statistics</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+.container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+h1 { font-size: 24px; margin-bottom: 4px; }
+.subtitle { color: #94a3b8; font-size: 14px; margin-bottom: 24px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+.card { background: #1e293b; border-radius: 8px; padding: 20px; }
+.card-label { font-size: 13px; color: #94a3b8; margin-bottom: 6px; }
+.card-value { font-size: 28px; font-weight: 700; color: #38bdf8; }
+.charts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+.chart-box { background: #1e293b; border-radius: 8px; padding: 20px; }
+.chart-box.full { grid-column: 1 / -1; }
+.chart-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; color: #cbd5e1; }
+.chart-wrap { position: relative; height: 280px; }
+.chart-wrap.tall { height: 340px; }
+table { width: 100%; border-collapse: collapse; background: #1e293b; border-radius: 8px; overflow: hidden; }
+th, td { padding: 10px 14px; text-align: left; font-size: 13px; }
+th { background: #334155; color: #94a3b8; font-weight: 600; }
+td { border-bottom: 1px solid #1e293b; }
+tr:nth-child(even) td { background: #1a2332; }
+.gate { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; }
+.gate h2 { margin-bottom: 16px; }
+.gate input { width: 300px; padding: 10px 14px; border: 1px solid #475569; border-radius: 6px; background: #1e293b; color: #e2e8f0; font-size: 15px; outline: none; }
+.gate input:focus { border-color: #38bdf8; }
+.gate button { margin-top: 12px; padding: 10px 28px; border: none; border-radius: 6px; background: #38bdf8; color: #0f172a; font-size: 15px; font-weight: 600; cursor: pointer; }
+.gate button:hover { background: #7dd3fc; }
+.gate .error { color: #f87171; margin-top: 10px; font-size: 13px; }
+.hidden { display: none !important; }
+.tabs { display: flex; gap: 4px; margin-bottom: 16px; }
+.tab { padding: 8px 16px; border: none; border-radius: 6px 6px 0 0; background: #334155; color: #94a3b8; cursor: pointer; font-size: 13px; }
+.tab.active { background: #1e293b; color: #38bdf8; }
+@media (max-width: 768px) { .charts { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<div id="gate" class="gate">
+  <h2>OPanel Dist Service</h2>
+  <input type="password" id="keyInput" placeholder="请输入访问密钥" autofocus>
+  <button id="keyBtn">进入</button>
+  <div class="error" id="gateError"></div>
+</div>
+
+<div id="dashboard" class="hidden">
+  <div class="container">
+    <h1>OPanel Dist Service</h1>
+    <p class="subtitle">文件分发统计面板</p>
+
+    <div class="cards" id="cards"></div>
+
+    <div class="charts">
+      <div class="chart-box full">
+        <div class="chart-title">每日下载量 (近30天)</div>
+        <div class="chart-wrap tall"><canvas id="dailyChart"></canvas></div>
+      </div>
+      <div class="chart-box">
+        <div class="chart-title">按服务器类型</div>
+        <div class="chart-wrap"><canvas id="serverChart"></canvas></div>
+      </div>
+      <div class="chart-box">
+        <div class="chart-title">按游戏版本</div>
+        <div class="chart-wrap"><canvas id="gameVersionChart"></canvas></div>
+      </div>
+      <div class="chart-box full">
+        <div class="chart-title">按 OPanel 版本</div>
+        <div class="chart-wrap"><canvas id="opanelVersionChart"></canvas></div>
+      </div>
+      <div class="chart-box full">
+        <div class="chart-title">下载趋势 (累计)</div>
+        <div class="chart-wrap"><canvas id="cumulativeChart"></canvas></div>
+      </div>
+    </div>
+
+    <div style="margin-bottom:16px">
+      <div class="tabs">
+        <button class="tab active" id="tabRecent">最近下载</button>
+        <button class="tab" id="tabTop">热门文件</button>
+      </div>
+      <div style="background:#1e293b;border-radius:0 8px 8px 8px;overflow-x:auto">
+        <table id="recordsTable"></table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let apiKey = "";
+
+function mergeBreakdowns(history) {
+  const merged = { opanelVersion: {}, server: {}, gameVersion: {} };
+  history.forEach(function(d) {
+    if (!d || !d.breakdown) return;
+    Object.entries(d.breakdown.opanelVersion || {}).forEach(function(e) { merged.opanelVersion[e[0]] = (merged.opanelVersion[e[0]] || 0) + e[1]; });
+    Object.entries(d.breakdown.server || {}).forEach(function(e) { merged.server[e[0]] = (merged.server[e[0]] || 0) + e[1]; });
+    Object.entries(d.breakdown.gameVersion || {}).forEach(function(e) { merged.gameVersion[e[0]] = (merged.gameVersion[e[0]] || 0) + e[1]; });
+  });
+  return merged;
+}
+
+function topSort(obj) {
+  return Object.entries(obj).sort(function(a, b) { return b[1] - a[1]; });
+}
+
+var charts = {};
+
+function destroyCharts() {
+  Object.values(charts).forEach(function(c) { c.destroy(); });
+  charts = {};
+}
+
+function buildCards(data) {
+  var todayCount = data.today ? data.today.count : 0;
+  var h = data.history || [];
+  var yesterday = h.length > 0 ? h[h.length - 1] : { count: 0 };
+  var weekTotal = h.slice(-7).reduce(function(s, d) { return s + d.count; }, 0);
+  var items = [
+    { label: "总下载量", value: data.totalDownloads.toLocaleString() },
+    { label: "今日下载", value: todayCount.toLocaleString() },
+    { label: "昨日下载", value: yesterday.count.toLocaleString() },
+    { label: "近7天下载", value: weekTotal.toLocaleString() },
+    { label: "记录条数", value: (data.records || []).length.toLocaleString() },
+  ];
+  document.getElementById("cards").innerHTML = items.map(function(i) {
+    return '<div class="card"><div class="card-label">' + i.label + '</div><div class="card-value">' + i.value + '</div></div>';
+  }).join("");
+}
+
+function buildDailyChart(data) {
+  var h = data.history || [];
+  var today = data.today;
+  var labels = [];
+  var values = [];
+  var all = h.concat(today && today.date ? [today] : []);
+  all.forEach(function(d) {
+    labels.push(d.date.slice(5));
+    values.push(d.count);
+  });
+  var ctx = document.getElementById("dailyChart").getContext("2d");
+  charts.daily = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: labels,
+      datasets: [{
+        label: "下载量",
+        data: values,
+        backgroundColor: values.map(function(_, i) { return i === values.length - 1 ? "#38bdf8" : "#38bdf880"; }),
+        borderRadius: 4,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: "#94a3b8", maxTicksLimit: 15, maxRotation: 0 }, grid: { color: "#334155" } },
+        y: { ticks: { color: "#94a3b8", beginAtZero: true, precision: 0 }, grid: { color: "#334155" } },
+      },
+    },
+  });
+}
+
+function buildPieChart(canvasId, obj, label, colors) {
+  var entries = topSort(obj);
+  if (entries.length === 0) {
+    entries = [["暂无数据", 1]];
+  }
+  var ctx = document.getElementById(canvasId).getContext("2d");
+  charts[canvasId] = new Chart(ctx, {
+    type: "doughnut",
+    data: {
+      labels: entries.map(function(e) { return e[0]; }),
+      datasets: [{
+        label: label,
+        data: entries.map(function(e) { return e[1]; }),
+        backgroundColor: entries.map(function(_, i) { return colors[i % colors.length]; }),
+        borderColor: "#1e293b",
+        borderWidth: 2,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: "right",
+          labels: { color: "#94a3b8", padding: 12, font: { size: 11 }, usePointStyle: true },
+        },
+      },
+    },
+  });
+}
+
+function buildBreakdownCharts(breakdown) {
+  var colors = ["#38bdf8","#a78bfa","#fb923c","#4ade80","#f87171","#fbbf24","#2dd4bf","#e879f9","#60a5fa","#34d399"];
+  buildPieChart("serverChart", breakdown.server, "下载量", colors);
+  buildPieChart("gameVersionChart", breakdown.gameVersion, "下载量", colors);
+  buildPieChart("opanelVersionChart", breakdown.opanelVersion, "下载量", colors);
+}
+
+function buildCumulativeChart(data) {
+  var h = data.history || [];
+  var today = data.today;
+  var all = h.concat(today && today.date ? [today] : []);
+  var labels = [];
+  var values = [];
+  var cum = 0;
+  all.forEach(function(d) {
+    cum += d.count;
+    labels.push(d.date.slice(5));
+    values.push(cum);
+  });
+  var ctx = document.getElementById("cumulativeChart").getContext("2d");
+  charts.cumulative = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: labels,
+      datasets: [{
+        label: "累计下载",
+        data: values,
+        borderColor: "#a78bfa",
+        backgroundColor: "#a78bfa33",
+        fill: true,
+        tension: 0.3,
+        pointRadius: 2,
+        pointBackgroundColor: "#a78bfa",
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: "#94a3b8", maxTicksLimit: 15, maxRotation: 0 }, grid: { color: "#334155" } },
+        y: { ticks: { color: "#94a3b8", beginAtZero: true, precision: 0 }, grid: { color: "#334155" } },
+      },
+    },
+  });
+}
+
+function buildRecordsTable(records) {
+  if (!records || records.length === 0) {
+    document.getElementById("recordsTable").innerHTML = '<tr><td style="text-align:center;color:#64748b;padding:20px">暂无下载记录</td></tr>';
+    return;
+  }
+  var recent = records.slice(-50).reverse();
+  var head = '<thead><tr><th>时间</th><th>IP</th><th>文件名</th><th>服务器</th><th>游戏版本</th><th>OPanel版本</th></tr></thead>';
+  var body = '<tbody>' + recent.map(function(r) {
+    return '<tr><td>' + r.timestamp.replace("T", " ").slice(0, 19) + '</td><td>' + r.ip + '</td><td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + r.assetName + '">' + r.assetName + '</td><td>' + r.server + '</td><td>' + r.gameVersion + '</td><td>' + r.opanelVersion + '</td></tr>';
+  }).join("") + '</tbody>';
+  document.getElementById("recordsTable").innerHTML = head + body;
+}
+
+function buildTopTable(records, breakdown) {
+  var nameCount = {};
+  (records || []).forEach(function(r) {
+    nameCount[r.assetName] = (nameCount[r.assetName] || 0) + 1;
+  });
+  var top = topSort(nameCount).slice(0, 50);
+  if (top.length === 0) {
+    document.getElementById("recordsTable").innerHTML = '<tr><td style="text-align:center;color:#64748b;padding:20px">暂无数据</td></tr>';
+    return;
+  }
+  var head = '<thead><tr><th>#</th><th>文件名</th><th>下载次数</th></tr></thead>';
+  var body = '<tbody>' + top.map(function(e, i) {
+    return '<tr><td>' + (i + 1) + '</td><td style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + e[0] + '">' + e[0] + '</td><td>' + e[1].toLocaleString() + '</td></tr>';
+  }).join("") + '</tbody>';
+  document.getElementById("recordsTable").innerHTML = head + body;
+}
+
+var currentData = null;
+
+function renderAll(data) {
+  currentData = data;
+  destroyCharts();
+  buildCards(data);
+  var h = data.history || [];
+  var today = data.today;
+  var mergedBreakdown = mergeBreakdowns(h.concat(today && today.date ? [today] : []));
+  buildDailyChart(data);
+  buildBreakdownCharts(mergedBreakdown);
+  buildCumulativeChart(data);
+  buildRecordsTable(data.records);
+  document.getElementById("tabRecent").classList.add("active");
+  document.getElementById("tabTop").classList.remove("active");
+}
+
+function loadStats() {
+  fetch("/api/stats?key=" + encodeURIComponent(apiKey))
+    .then(function(r) {
+      if (!r.ok) throw new Error("Unauthorized");
+      return r.json();
+    })
+    .then(function(data) {
+      document.getElementById("gate").classList.add("hidden");
+      document.getElementById("dashboard").classList.remove("hidden");
+      renderAll(data);
+    })
+    .catch(function() {
+      apiKey = "";
+      document.getElementById("dashboard").classList.add("hidden");
+      document.getElementById("gate").classList.remove("hidden");
+      document.getElementById("gateError").textContent = "密钥无效或请求失败";
+    });
+}
+
+document.getElementById("keyBtn").addEventListener("click", function() {
+  apiKey = document.getElementById("keyInput").value.trim();
+  if (!apiKey) {
+    document.getElementById("gateError").textContent = "请输入密钥";
+    return;
+  }
+  loadStats();
+});
+
+document.getElementById("keyInput").addEventListener("keydown", function(e) {
+  if (e.key === "Enter") document.getElementById("keyBtn").click();
+});
+
+document.getElementById("tabRecent").addEventListener("click", function() {
+  this.classList.add("active");
+  document.getElementById("tabTop").classList.remove("active");
+  if (currentData) buildRecordsTable(currentData.records);
+});
+
+document.getElementById("tabTop").addEventListener("click", function() {
+  this.classList.add("active");
+  document.getElementById("tabRecent").classList.remove("active");
+  if (currentData) buildTopTable(currentData.records, currentData.breakdown);
+});
+
+</script>
+</body>
+</html>
