@@ -17,6 +17,22 @@ function emptyDay(date?: string): DailyStats {
   };
 }
 
+function normalizeDay(raw: any, fallbackDate?: string): DailyStats {
+  const base = emptyDay(fallbackDate);
+  if (!raw || typeof raw !== "object") return base;
+
+  const src = raw.breakdown ?? raw.assets ?? {};
+  return {
+    date: typeof raw.date === "string" ? raw.date : base.date,
+    count: typeof raw.count === "number" ? raw.count : 0,
+    breakdown: {
+      opanelVersion: src.opanelVersion ?? {},
+      server: src.server ?? {},
+      gameVersion: src.gameVersion ?? {},
+    },
+  };
+}
+
 interface PersistedData {
   totalDownloads: number;
   today: DailyStats;
@@ -45,9 +61,9 @@ class StatsService {
       const parsed = JSON.parse(raw);
       return {
         totalDownloads: parsed.totalDownloads ?? 0,
-        today: parsed.today ?? emptyDay(),
-        history: parsed.history ?? [],
-        records: parsed.records ?? [],
+        today: normalizeDay(parsed.today),
+        history: Array.isArray(parsed.history) ? parsed.history.map((d: any) => normalizeDay(d)) : [],
+        records: Array.isArray(parsed.records) ? parsed.records : [],
       };
     } catch {
       return { totalDownloads: 0, today: emptyDay(), history: [], records: [] };
