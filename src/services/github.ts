@@ -38,7 +38,7 @@ class GithubService {
     for (let page = 1; ; page++) {
       const { data } = await axios.get<GithubRelease[]>(
         `${BASE_URL}/repos/${REPO}/releases`,
-        { headers: this.headers, params: { per_page: PER_PAGE, page } }
+        { headers: this.headers, params: { per_page: PER_PAGE, page }, timeout: 10_000 }
       );
       all.push(...data);
       if (data.length < PER_PAGE) return all;

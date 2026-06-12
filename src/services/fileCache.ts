@@ -1,7 +1,11 @@
 import fs from "fs";
 import path from "path";
+import { Readable } from "stream";
 import { pipeline } from "stream/promises";
 import axios from "axios";
+
+const RESPONSE_TIMEOUT_MS = 30_000; // max time until response headers arrive
+const STALL_TIMEOUT_MS = 60_000; // max gap between data chunks while streaming
 
 class FileCache {
   private cacheDir: string;
@@ -41,16 +45,33 @@ class FileCache {
     const headers: Record<string, string> = { Accept: "application/octet-stream" };
     if (token) headers["Authorization"] = `Bearer ${token}`;
 
-    const response = await axios.get<NodeJS.ReadableStream>(githubUrl, {
+    const response = await axios.get<Readable>(githubUrl, {
       responseType: "stream",
       headers,
+      timeout: RESPONSE_TIMEOUT_MS,
     });
 
+    // axios' timeout only covers up to the response headers; destroy the
+    // stream ourselves if the body stalls mid-transfer
+    const source = response.data;
+    let stallTimer: ReturnType<typeof setTimeout>;
+    const resetStall = () => {
+      clearTimeout(stallTimer);
+      stallTimer = setTimeout(
+        () => source.destroy(new Error(`Download stalled: ${filename}`)),
+        STALL_TIMEOUT_MS
+      );
+    };
+    source.on("data", resetStall);
+    resetStall();
+
     try {
-      await pipeline(response.data, fs.createWriteStream(tmp));
+      await pipeline(source, fs.createWriteStream(tmp));
     } catch (err) {
       fs.unlink(tmp, () => {});
       throw err;
+    } finally {
+      clearTimeout(stallTimer!);
     }
 
     fs.renameSync(tmp, dest);
