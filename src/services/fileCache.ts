@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { pipeline } from "stream/promises";
 import axios from "axios";
 
 class FileCache {
@@ -27,7 +28,9 @@ class FileCache {
 
     const promise = this._fetchAndSave(filename, githubUrl, token);
     this.inFlight.set(filename, promise);
-    promise.finally(() => this.inFlight.delete(filename));
+    promise
+      .catch(() => {})
+      .finally(() => this.inFlight.delete(filename));
     return promise;
   }
 
@@ -43,14 +46,12 @@ class FileCache {
       headers,
     });
 
-    await new Promise<void>((resolve, reject) => {
-      const writer = fs.createWriteStream(tmp);
-      (response.data as NodeJS.ReadableStream).pipe(writer);
-      writer.on("finish", resolve);
-      writer.on("error", (err) => {
-        fs.unlink(tmp, () => reject(err));
-      });
-    });
+    try {
+      await pipeline(response.data, fs.createWriteStream(tmp));
+    } catch (err) {
+      fs.unlink(tmp, () => {});
+      throw err;
+    }
 
     fs.renameSync(tmp, dest);
     return dest;
