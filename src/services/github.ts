@@ -15,6 +15,8 @@ function parseAssetName(name: string): { server: string; gameVersion: string; op
 class GithubService {
   private releasesCache = new MemoryCache<ReleasesMap>();
   private assetUrlMap = new Map<number, string>();
+  private inFlightFetch: Promise<ReleasesMap> | null = null;
+  private lastGood: ReleasesMap | null = null;
   private token?: string;
   private cacheTtlMs: number;
 
@@ -49,7 +51,25 @@ class GithubService {
     const cached = this.releasesCache.get("releases");
     if (cached) return cached;
 
-    const data = await this.fetchAllReleasePages();
+    if (this.inFlightFetch) return this.inFlightFetch;
+
+    this.inFlightFetch = this.refresh().finally(() => {
+      this.inFlightFetch = null;
+    });
+    return this.inFlightFetch;
+  }
+
+  private async refresh(): Promise<ReleasesMap> {
+    let data: GithubRelease[];
+    try {
+      data = await this.fetchAllReleasePages();
+    } catch (err) {
+      if (this.lastGood) {
+        console.error("[github] Fetch failed, serving stale releases:", err);
+        return this.lastGood;
+      }
+      throw err;
+    }
 
     this.assetUrlMap.clear();
 
@@ -80,6 +100,7 @@ class GithubService {
     }
 
     this.releasesCache.set("releases", releasesMap, this.cacheTtlMs);
+    this.lastGood = releasesMap;
     return releasesMap;
   }
 
