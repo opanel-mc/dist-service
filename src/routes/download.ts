@@ -33,7 +33,9 @@ downloadRouter.get("/:assetId", async (req: Request, res: Response, next: NextFu
     res.setHeader("Content-Length", stat.size);
 
     statsService.recordDownload(asset, req.ip ?? "unknown");
-    fs.createReadStream(localPath).pipe(res);
+    const stream = fs.createReadStream(localPath);
+    stream.on("error", next);
+    stream.pipe(res);
   } catch (err) {
     next(err);
   }
