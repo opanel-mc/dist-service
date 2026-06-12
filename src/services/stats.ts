@@ -78,6 +78,7 @@ class StatsService {
       this.data.history = this.data.history.slice(-MAX_HISTORY_DAYS);
     }
     this.data.today = emptyDay();
+    this.scheduleFlush();
   }
 
   private prune(): void {
@@ -92,16 +93,27 @@ class StatsService {
     }
   }
 
+  private write(): void {
+    try {
+      fs.writeFileSync(this.statsFile, JSON.stringify(this.data, null, 2), "utf-8");
+    } catch (err) {
+      console.error("[stats] Failed to persist stats:", err);
+    }
+  }
+
   private scheduleFlush(): void {
     if (this.flushTimer) return;
     this.flushTimer = setTimeout(() => {
       this.flushTimer = null;
-      try {
-        fs.writeFileSync(this.statsFile, JSON.stringify(this.data, null, 2), "utf-8");
-      } catch (err) {
-        console.error("[stats] Failed to persist stats:", err);
-      }
+      this.write();
     }, 500);
+  }
+
+  flushSync(): void {
+    if (!this.flushTimer) return;
+    clearTimeout(this.flushTimer);
+    this.flushTimer = null;
+    this.write();
   }
 
   recordDownload(asset: ParsedAsset, ip: string): void {
