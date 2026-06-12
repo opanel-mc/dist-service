@@ -16,6 +16,14 @@ class FileCache {
     if (!fs.existsSync(this.cacheDir)) {
       fs.mkdirSync(this.cacheDir, { recursive: true });
     }
+    // remove partial downloads left over from a previous crash
+    for (const f of fs.readdirSync(this.cacheDir)) {
+      if (f.endsWith(".tmp")) {
+        try {
+          fs.unlinkSync(path.join(this.cacheDir, f));
+        } catch {}
+      }
+    }
   }
 
   has(filename: string): boolean {
