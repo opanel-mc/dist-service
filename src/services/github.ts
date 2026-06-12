@@ -32,14 +32,24 @@ class GithubService {
     return h;
   }
 
+  private async fetchAllReleasePages(): Promise<GithubRelease[]> {
+    const PER_PAGE = 100;
+    const all: GithubRelease[] = [];
+    for (let page = 1; ; page++) {
+      const { data } = await axios.get<GithubRelease[]>(
+        `${BASE_URL}/repos/${REPO}/releases`,
+        { headers: this.headers, params: { per_page: PER_PAGE, page } }
+      );
+      all.push(...data);
+      if (data.length < PER_PAGE) return all;
+    }
+  }
+
   async fetchReleases(): Promise<ReleasesMap> {
     const cached = this.releasesCache.get("releases");
     if (cached) return cached;
 
-    const { data } = await axios.get<GithubRelease[]>(
-      `${BASE_URL}/repos/${REPO}/releases`,
-      { headers: this.headers }
-    );
+    const data = await this.fetchAllReleasePages();
 
     this.assetUrlMap.clear();
 
