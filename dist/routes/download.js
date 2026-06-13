@@ -34,7 +34,9 @@ exports.downloadRouter.get("/:assetId", async (req, res, next) => {
         res.setHeader("Content-Disposition", `attachment; filename="${asset.name}"`);
         res.setHeader("Content-Length", stat.size);
         stats_1.statsService.recordDownload(asset, req.ip ?? "unknown");
-        fs_1.default.createReadStream(localPath).pipe(res);
+        const stream = fs_1.default.createReadStream(localPath);
+        stream.on("error", next);
+        stream.pipe(res);
     }
     catch (err) {
         next(err);

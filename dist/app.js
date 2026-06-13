@@ -29,6 +29,12 @@ function createApp() {
     });
     app.use((err, _req, res, _next) => {
         console.error(err);
+        if (res.headersSent) {
+            // mid-stream failure: destroy the socket so the client sees a
+            // truncated transfer instead of a hung connection
+            res.destroy();
+            return;
+        }
         const message = err instanceof Error ? err.message : "Internal server error";
         res.status(500).json({ error: message });
     });

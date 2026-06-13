@@ -1,6 +1,6 @@
 import https from "https";
 import { createApp, getSSLConfig } from "./app";
-import { statsService } from "./services/stats";
+import { prisma } from "./services/db";
 
 const PORT = parseInt(process.env.PORT ?? "3000", 10);
 
@@ -17,10 +17,9 @@ if (ssl) {
   });
 }
 
-function shutdown() {
-  statsService.flushSync();
+async function shutdown() {
+  await prisma.$disconnect();
   process.exit(0);
 }
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
-process.on("exit", () => statsService.flushSync());

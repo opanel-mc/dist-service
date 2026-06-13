@@ -19,6 +19,8 @@ class GithubService {
     constructor(token, cacheTtlSec = 300) {
         this.releasesCache = new cache_1.MemoryCache();
         this.assetUrlMap = new Map();
+        this.inFlightFetch = null;
+        this.lastGood = null;
         this.token = token;
         this.cacheTtlMs = cacheTtlSec * 1000;
     }
@@ -31,11 +33,39 @@ class GithubService {
             h["Authorization"] = `Bearer ${this.token}`;
         return h;
     }
+    async fetchAllReleasePages() {
+        const PER_PAGE = 100;
+        const all = [];
+        for (let page = 1;; page++) {
+            const { data } = await axios_1.default.get(`${BASE_URL}/repos/${REPO}/releases`, { headers: this.headers, params: { per_page: PER_PAGE, page }, timeout: 10000 });
+            all.push(...data);
+            if (data.length < PER_PAGE)
+                return all;
+        }
+    }
     async fetchReleases() {
         const cached = this.releasesCache.get("releases");
         if (cached)
             return cached;
-        const { data } = await axios_1.default.get(`${BASE_URL}/repos/${REPO}/releases`, { headers: this.headers });
+        if (this.inFlightFetch)
+            return this.inFlightFetch;
+        this.inFlightFetch = this.refresh().finally(() => {
+            this.inFlightFetch = null;
+        });
+        return this.inFlightFetch;
+    }
+    async refresh() {
+        let data;
+        try {
+            data = await this.fetchAllReleasePages();
+        }
+        catch (err) {
+            if (this.lastGood) {
+                console.error("[github] Fetch failed, serving stale releases:", err);
+                return this.lastGood;
+            }
+            throw err;
+        }
         this.assetUrlMap.clear();
         const releasesMap = {};
         for (const r of data) {
@@ -63,6 +93,7 @@ class GithubService {
             };
         }
         this.releasesCache.set("releases", releasesMap, this.cacheTtlMs);
+        this.lastGood = releasesMap;
         return releasesMap;
     }
     async resolveAsset(assetId) {

@@ -1,6 +1,5 @@
-import fs from "fs";
-import path from "path";
-import { ParsedAsset, DownloadRecord, DailyStats, DailyBreakdown, StatsSnapshot } from "../types";
+import { ParsedAsset, DownloadRecord, DailyStats, StatsSnapshot } from "../types";
+import { prisma } from "./db";
 
 const MAX_RECORDS = 10000;
 const MAX_HISTORY_DAYS = 30;
@@ -9,154 +8,89 @@ function todayDate(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-function emptyDay(date?: string): DailyStats {
+function cutoffDate(): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - MAX_HISTORY_DAYS);
+  return d.toISOString().slice(0, 10);
+}
+
+function emptyDay(date: string): DailyStats {
   return {
-    date: date ?? todayDate(),
+    date,
     count: 0,
     breakdown: { opanelVersion: {}, server: {}, gameVersion: {} },
   };
 }
 
-function normalizeDay(raw: any, fallbackDate?: string): DailyStats {
-  const base = emptyDay(fallbackDate);
-  if (!raw || typeof raw !== "object") return base;
-
-  const src = raw.breakdown ?? raw.assets ?? {};
-  return {
-    date: typeof raw.date === "string" ? raw.date : base.date,
-    count: typeof raw.count === "number" ? raw.count : 0,
-    breakdown: {
-      opanelVersion: src.opanelVersion ?? {},
-      server: src.server ?? {},
-      gameVersion: src.gameVersion ?? {},
-    },
-  };
-}
-
-interface PersistedData {
-  totalDownloads: number;
-  today: DailyStats;
-  history: DailyStats[];
-  records: DownloadRecord[];
-}
-
 class StatsService {
-  private statsFile: string;
-  private data: PersistedData;
-  private flushTimer: ReturnType<typeof setTimeout> | null = null;
-
-  constructor(statsFile: string) {
-    this.statsFile = path.resolve(statsFile);
-    const dir = path.dirname(this.statsFile);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    this.data = this.load();
-    this.prune();
-  }
-
-  private load(): PersistedData {
+  // Fire-and-forget from the download hot path: a stats write must never break
+  // a download response, so errors are swallowed (logged) here rather than
+  // propagated to the caller.
+  async recordDownload(asset: ParsedAsset, ip: string): Promise<void> {
     try {
-      const raw = fs.readFileSync(this.statsFile, "utf-8");
-      const parsed = JSON.parse(raw);
-      return {
-        totalDownloads: parsed.totalDownloads ?? 0,
-        today: normalizeDay(parsed.today),
-        history: Array.isArray(parsed.history) ? parsed.history.map((d: any) => normalizeDay(d)) : [],
-        records: Array.isArray(parsed.records) ? parsed.records : [],
-      };
-    } catch {
-      return { totalDownloads: 0, today: emptyDay(), history: [], records: [] };
-    }
-  }
-
-  private rolloverIfNeeded(): void {
-    if (this.data.today.date === todayDate()) return;
-
-    this.data.history.push(this.data.today);
-    if (this.data.history.length > MAX_HISTORY_DAYS) {
-      this.data.history = this.data.history.slice(-MAX_HISTORY_DAYS);
-    }
-    this.data.today = emptyDay();
-    this.scheduleFlush();
-  }
-
-  private prune(): void {
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - MAX_HISTORY_DAYS);
-    const cutoffStr = cutoff.toISOString().slice(0, 10);
-
-    this.data.history = this.data.history.filter((d) => d.date >= cutoffStr);
-    this.data.records = this.data.records.filter((r) => r.timestamp.slice(0, 10) >= cutoffStr);
-    if (this.data.records.length > MAX_RECORDS) {
-      this.data.records = this.data.records.slice(-MAX_RECORDS);
-    }
-  }
-
-  private write(): void {
-    try {
-      fs.writeFileSync(this.statsFile, JSON.stringify(this.data, null, 2), "utf-8");
+      await prisma.downloadRecord.create({
+        data: {
+          day: todayDate(),
+          ip,
+          assetId: asset.id,
+          assetName: asset.name,
+          server: asset.server,
+          gameVersion: asset.gameVersion,
+          opanelVersion: asset.opanelVersion,
+        },
+      });
     } catch (err) {
-      console.error("[stats] Failed to persist stats:", err);
+      console.error("[stats] Failed to record download:", err);
     }
   }
 
-  private scheduleFlush(): void {
-    if (this.flushTimer) return;
-    this.flushTimer = setTimeout(() => {
-      this.flushTimer = null;
-      this.write();
-    }, 500);
-  }
+  async getSnapshot(): Promise<StatsSnapshot> {
+    const today = todayDate();
+    const where = { day: { gte: cutoffDate() } };
 
-  flushSync(): void {
-    if (!this.flushTimer) return;
-    clearTimeout(this.flushTimer);
-    this.flushTimer = null;
-    this.write();
-  }
+    const [total, recent, perDay, perServer, perGame, perOpanel] = await Promise.all([
+      prisma.downloadRecord.count(),
+      prisma.downloadRecord.findMany({ orderBy: { createdAt: "desc" }, take: MAX_RECORDS }),
+      prisma.downloadRecord.groupBy({ by: ["day"], where, _count: { _all: true } }),
+      prisma.downloadRecord.groupBy({ by: ["day", "server"], where, _count: { _all: true } }),
+      prisma.downloadRecord.groupBy({ by: ["day", "gameVersion"], where, _count: { _all: true } }),
+      prisma.downloadRecord.groupBy({ by: ["day", "opanelVersion"], where, _count: { _all: true } }),
+    ]);
 
-  recordDownload(asset: ParsedAsset, ip: string): void {
-    this.rolloverIfNeeded();
-    this.data.totalDownloads++;
-
-    const today = this.data.today;
-    today.count++;
-
-    const b = today.breakdown;
-    b.opanelVersion[asset.opanelVersion] = (b.opanelVersion[asset.opanelVersion] ?? 0) + 1;
-    b.server[asset.server] = (b.server[asset.server] ?? 0) + 1;
-    b.gameVersion[asset.gameVersion] = (b.gameVersion[asset.gameVersion] ?? 0) + 1;
-
-    const record: DownloadRecord = {
-      timestamp: new Date().toISOString(),
-      ip,
-      assetId: asset.id,
-      assetName: asset.name,
-      server: asset.server,
-      gameVersion: asset.gameVersion,
-      opanelVersion: asset.opanelVersion,
+    const byDay = new Map<string, DailyStats>();
+    const ensure = (day: string): DailyStats => {
+      let d = byDay.get(day);
+      if (!d) {
+        d = emptyDay(day);
+        byDay.set(day, d);
+      }
+      return d;
     };
-    this.data.records.push(record);
 
-    if (this.data.records.length > MAX_RECORDS * 1.5) {
-      this.data.records = this.data.records.slice(-MAX_RECORDS);
-    }
+    for (const row of perDay) ensure(row.day).count = row._count._all;
+    for (const row of perServer) ensure(row.day).breakdown.server[row.server] = row._count._all;
+    for (const row of perGame) ensure(row.day).breakdown.gameVersion[row.gameVersion] = row._count._all;
+    for (const row of perOpanel) ensure(row.day).breakdown.opanelVersion[row.opanelVersion] = row._count._all;
 
-    this.scheduleFlush();
-  }
+    const todayStats = byDay.get(today) ?? emptyDay(today);
+    const history = [...byDay.values()]
+      .filter((d) => d.date !== today)
+      .sort((a, b) => a.date.localeCompare(b.date));
 
-  getSnapshot(): StatsSnapshot {
-    this.rolloverIfNeeded();
-    return {
-      totalDownloads: this.data.totalDownloads,
-      today: JSON.parse(JSON.stringify(this.data.today)),
-      history: JSON.parse(JSON.stringify(this.data.history)),
-      records: JSON.parse(JSON.stringify(this.data.records)),
-    };
+    // Most recent MAX_RECORDS, reversed to oldest -> newest to preserve the
+    // ordering the flat-file implementation exposed.
+    const records: DownloadRecord[] = recent.reverse().map((r) => ({
+      timestamp: r.createdAt.toISOString(),
+      ip: r.ip,
+      assetId: r.assetId,
+      assetName: r.assetName,
+      server: r.server,
+      gameVersion: r.gameVersion,
+      opanelVersion: r.opanelVersion,
+    }));
+
+    return { totalDownloads: total, today: todayStats, history, records };
   }
 }
 
-export const statsService = new StatsService(
-  process.env.STATS_FILE ?? "./data/stats.json"
-);
+export const statsService = new StatsService();

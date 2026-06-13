@@ -5,3 +5,5 @@ ssl/
 .env
 .DS_Store
 *.tmp
+
+/src/generated/prisma

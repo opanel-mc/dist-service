@@ -1,4 +1,4 @@
-import { Router, Request, Response } from "express";
+import { Router, Request, Response, NextFunction } from "express";
 import { statsService } from "../services/stats";
 import { statsAuth } from "../middleware/auth";
 
@@ -6,6 +6,10 @@ export const statsRouter = Router();
 
 statsRouter.use(statsAuth);
 
-statsRouter.get("/", (_req: Request, res: Response) => {
-  res.json(statsService.getSnapshot());
+statsRouter.get("/", async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json(await statsService.getSnapshot());
+  } catch (err) {
+    next(err);
+  }
 });

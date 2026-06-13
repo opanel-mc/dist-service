@@ -1,0 +1,29 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// One row per download. All aggregate stats (totals, daily counts, and the
+/// per-server / per-game-version / per-opanel-version breakdowns) are derived
+/// from this table via GROUP BY queries, so there is no denormalized daily
+/// table to keep in sync.
+model DownloadRecord {
+  id            Int      @id @default(autoincrement())
+  createdAt     DateTime @default(now())
+  /// UTC date ("YYYY-MM-DD") of the download, denormalized for fast daily grouping.
+  day           String
+  ip            String
+  assetId       Int
+  assetName     String
+  server        String
+  gameVersion   String
+  opanelVersion String
+
+  @@index([day])
+  @@index([createdAt])
+  @@map("download_record")
+}
